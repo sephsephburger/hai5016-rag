@@ -1,0 +1,14 @@
+[project]
+name = "hai5016-rag"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain>=1.1.0",
+    "langchain-google-genai>=3.2.0",
+    "langchain-postgres>=0.0.16",
+    "psycopg2-binary>=2.9.11",
+    "python-dotenv>=1.2.1",
+    "streamlit>=1.51.0",
+]

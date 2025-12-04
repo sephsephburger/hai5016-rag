@@ -4,9 +4,25 @@ from langchain_postgres import PGVector
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.tools import tool
 from langchain.agents import create_agent
-from langchain_core.messages import get_text_content
 from dotenv import load_dotenv
 import os
+
+
+def _normalize_content(content):
+    """Return text content from LangChain message content, handling list payloads."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                parts.append(item["text"])
+            elif hasattr(item, "text"):
+                parts.append(item.text)
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(content)
 
 # Load environment variables
 load_dotenv()
@@ -108,7 +124,7 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
                 last_message = event["messages"][-1]
                 
                 # Extract text content (handles both string and list payloads)
-                content = get_text_content(last_message)
+                content = _normalize_content(getattr(last_message, "content", ""))
                 if content:
                     full_response = content
                     message_placeholder.markdown(full_response)

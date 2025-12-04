@@ -4,6 +4,7 @@ from langchain_postgres import PGVector
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.tools import tool
 from langchain.agents import create_agent
+from langchain_core.messages import get_text_content
 from dotenv import load_dotenv
 import os
 
@@ -106,10 +107,11 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
             ):
                 last_message = event["messages"][-1]
                 
-                # Check if it's an AI message with content
-                if hasattr(last_message, 'content') and last_message.content:
-                    full_response = last_message.content
-                    message_placeholder.markdown(full_response + "▌")
+                # Extract text content (handles both string and list payloads)
+                content = get_text_content(last_message)
+                if content:
+                    full_response = content
+                    message_placeholder.markdown(full_response)
             
             # Display final response
             message_placeholder.markdown(full_response)

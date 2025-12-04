@@ -9,8 +9,16 @@ from langchain.chat_models import init_chat_model
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import FAISS
 from pypdf import PdfReader
+
+# Prefer community FAISS; fall back to legacy import
+try:
+    from langchain_community.vectorstores import FAISS
+except ImportError:  # pragma: no cover
+    try:
+        from langchain.vectorstores import FAISS  # type: ignore
+    except ImportError as exc:
+        raise ImportError("FAISS vector store not available. Install langchain-community.") from exc
 
 # Support both the standalone splitter package and older langchain splitters.
 try:

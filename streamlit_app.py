@@ -122,6 +122,7 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
         with st.expander("See Thinking Process", expanded=False):
             thinking_placeholder = st.empty()
         full_response = ""
+        thinking_log = []
         
         try:
             # Stream the agent's response
@@ -129,13 +130,24 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
                 {"messages": [{"role": "user", "content": prompt}]},
                 stream_mode="values",
             ):
-                last_message = event["messages"][-1]
+                last_message = event.get("messages", [])[-1] if event.get("messages") else None
                 
                 # Extract text content (handles both string and list payloads)
-                content = _normalize_content(getattr(last_message, "content", ""))
+                content = _normalize_content(getattr(last_message, "content", "")) if last_message else ""
                 if content:
                     full_response = content
-                    thinking_placeholder.markdown(full_response)
+
+                # Append event trace for thinking log (truncated for readability)
+                if event.get("messages"):
+                    entries = []
+                    for msg in event["messages"]:
+                        role = getattr(msg, "role", "unknown")
+                        text = _normalize_content(getattr(msg, "content", ""))
+                        if text:
+                            text = text[:800]
+                        entries.append(f"{role}: {text}")
+                    thinking_log.append(" | ".join(entries))
+                    thinking_placeholder.markdown("\n\n".join(thinking_log))
             
             # Display final response
             message_placeholder.markdown(full_response)

@@ -6,7 +6,7 @@ from typing import List, Tuple
 import streamlit as st
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import GoogleGenerativeAIEmbeddings

@@ -9,7 +9,16 @@ from langchain.chat_models import init_chat_model
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
+
+# Prefer community loaders; fall back to legacy if needed.
+try:
+    from langchain_community.document_loaders import PyPDFLoader
+except ImportError:  # pragma: no cover
+    try:
+        from langchain.document_loaders import PyPDFLoader  # type: ignore
+    except ImportError as exc:
+        raise ImportError("PyPDFLoader not available. Ensure langchain-community is installed.") from exc
+
 from langchain_community.vectorstores import FAISS
 
 # Support both the standalone splitter package and older langchain splitters.

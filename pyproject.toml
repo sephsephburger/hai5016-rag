@@ -7,8 +7,9 @@ requires-python = ">=3.11"
 dependencies = [
     "langchain>=1.1.0",
     "langchain-google-genai>=3.2.0",
-    "langchain-postgres>=0.0.16",
-    "psycopg2-binary>=2.9.11",
+    "langchain-community>=0.3.0",
+    "faiss-cpu>=1.8.0",
+    "pypdf>=4.0.0",
     "python-dotenv>=1.2.1",
     "streamlit>=1.51.0",
 ]

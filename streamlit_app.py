@@ -1,147 +1,197 @@
-import streamlit as st
-from langchain.chat_models import init_chat_model
-from langchain_postgres import PGVector
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.tools import tool
-from langchain.agents import create_agent
-from dotenv import load_dotenv
 import os
+import tempfile
+from pathlib import Path
+from typing import List, Tuple
 
-# Load environment variables
+import streamlit as st
+from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import FAISS
+
+
+# Load environment variables early so Streamlit picks them up
 load_dotenv()
 
-# Page configuration
+
 st.set_page_config(
-    page_title="RAG Agent Chat",
-    page_icon="🤖",
-    layout="wide"
+    page_title="RAG Chatbot",
+    page_icon="💬",
+    layout="wide",
 )
 
-st.title("🤖 RAG Agent Chat")
-st.markdown("Ask questions about the blog posts and get AI-powered answers!")
+st.title("RAG Chatbot (no database)")
+st.caption("Bring your own files, we keep everything in memory.")
 
-# Initialize session state for chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
-# Initialize the agent (cached to avoid reinitializing on every interaction)
-@st.cache_resource
-def initialize_agent():
-    """Initialize the RAG agent with vector store and tools."""
-    
-    # Check for API key
+@st.cache_resource(show_spinner=False)
+def load_model():
+    """Load the chat model."""
     if not os.environ.get("GOOGLE_API_KEY"):
-        st.error("Please set the GOOGLE_API_KEY environment variable in your .env file.")
+        st.error("Missing GOOGLE_API_KEY. Add it to your .env before running.")
         st.stop()
-    
-    # Initialize model and embeddings
-    model = init_chat_model("google_genai:gemini-2.5-flash")
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
-    
-    # Check for Supabase connection string
-    if not os.environ.get("SUPABASE_CONNECTION_STRING"):
-        st.error("Please set the SUPABASE_CONNECTION_STRING environment variable in your .env file.")
+    return init_chat_model("google_genai:gemini-2.5-flash")
+
+
+@st.cache_resource(show_spinner=False)
+def load_embeddings():
+    """Load embeddings model."""
+    if not os.environ.get("GOOGLE_API_KEY"):
+        st.error("Missing GOOGLE_API_KEY. Add it to your .env before running.")
         st.stop()
-    
-    # Initialize vector store
-    vector_store = PGVector(
-        embeddings=embeddings,
-        collection_name="lilianweng_blog",
-        connection=os.environ["SUPABASE_CONNECTION_STRING"],
-    )
-    
-    # Define the retrieval tool
-    @tool(response_format="content_and_artifact")
-    def retrieve_context(query: str):
-        """Retrieve information to help answer a query."""
-        retrieved_docs = vector_store.similarity_search(query, k=2)
-        serialized = "\n\n".join(
-            (f"Source: {doc.metadata}\nContent: {doc.page_content}")
-            for doc in retrieved_docs
+    return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+
+
+def build_documents(files: List, pasted_text: str) -> List[Document]:
+    """Convert uploads and pasted text into LangChain Documents."""
+    docs: List[Document] = []
+
+    for file in files or []:
+        suffix = Path(file.name).suffix.lower()
+
+        if suffix in {".txt", ".md"}:
+            content = file.read().decode("utf-8", errors="ignore")
+            docs.append(Document(page_content=content, metadata={"source": file.name}))
+
+        elif suffix == ".pdf":
+            # Persist to a temp file because PyPDFLoader works with paths
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(file.getbuffer())
+                temp_path = tmp.name
+            loader = PyPDFLoader(temp_path)
+            docs.extend(
+                Document(page_content=page.page_content, metadata={"source": file.name, **page.metadata})
+                for page in loader.load()
+            )
+            os.unlink(temp_path)
+
+        else:
+            st.warning(f"Unsupported file type skipped: {file.name}")
+
+    if pasted_text and pasted_text.strip():
+        docs.append(Document(page_content=pasted_text.strip(), metadata={"source": "pasted_text"}))
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+    return splitter.split_documents(docs)
+
+
+def build_vector_store(docs: List[Document]):
+    """Embed docs into an in-memory FAISS index."""
+    embeddings = load_embeddings()
+    return FAISS.from_documents(docs, embeddings)
+
+
+def render_sidebar() -> Tuple[List[Document], bool]:
+    """Handle uploads, pasted text, and vector store creation."""
+    with st.sidebar:
+        st.header("Knowledge Base")
+        uploaded_files = st.file_uploader(
+            "Upload files (.txt, .md, .pdf)",
+            type=["txt", "md", "pdf"],
+            accept_multiple_files=True,
         )
-        return serialized, retrieved_docs
-    
-    # Create the agent
-    tools = [retrieve_context]
-    prompt = (
-        "You are a helpful AI assistant with access to a tool that retrieves context from blog posts. "
-        "Use the tool to help answer user queries accurately. "
-        "Always cite sources when providing information from the retrieved context."
+        pasted_text = st.text_area("Or paste text", height=180, placeholder="Paste notes, blog posts, etc.")
+
+        build_clicked = st.button("Build vector store", type="primary")
+        reset_clicked = st.button("Clear vector store", type="secondary")
+
+    docs: List[Document] = []
+    if build_clicked:
+        docs = build_documents(uploaded_files or [], pasted_text)
+        if not docs:
+            st.warning("No ingestible content found. Add text or files first.")
+        else:
+            with st.spinner("Indexing content in-memory..."):
+                st.session_state.vector_store = build_vector_store(docs)
+                st.session_state.kb_sources = sorted({doc.metadata.get("source", "unknown") for doc in docs})
+                st.success(f"Indexed {len(docs)} chunks from {len(st.session_state.kb_sources)} source(s).")
+
+    if reset_clicked:
+        st.session_state.vector_store = None
+        st.session_state.kb_sources = []
+        st.success("Cleared vector store.")
+
+    return docs, build_clicked
+
+
+def retrieve_context(query: str):
+    """Fetch top matching chunks with the in-memory index."""
+    vector_store = st.session_state.get("vector_store")
+    if vector_store is None:
+        st.warning("Add documents and build the vector store before chatting.")
+        st.stop()
+    return vector_store.similarity_search(query, k=4)
+
+
+def stream_answer(question: str, context_docs: List[Document]) -> str:
+    """Generate an answer with streaming updates."""
+    model = load_model()
+
+    context_text = "\n\n".join(
+        f"Source: {doc.metadata.get('source', 'unknown')}\n{doc.page_content}"
+        for doc in context_docs
     )
-    agent = create_agent(model, tools, system_prompt=prompt)
-    
-    return agent
+    system_prompt = (
+        "You are a helpful chatbot that only answers using the provided context.\n"
+        "If the context does not contain the answer, say you do not know.\n"
+        "Include brief source labels that support your answer.\n\n"
+        f"Context:\n{context_text}"
+    )
 
-# Initialize the agent
-try:
-    agent = initialize_agent()
-except Exception as e:
-    st.error(f"Error initializing agent: {str(e)}")
-    st.stop()
+    full_response = ""
+    message_placeholder = st.empty()
 
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    for chunk in model.stream([SystemMessage(content=system_prompt), HumanMessage(content=question)]):
+        full_response += chunk.content or ""
+        message_placeholder.markdown(full_response)
 
-# Chat input
-if prompt := st.chat_input("Ask a question about the blog posts..."):
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Display user message
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    # Display assistant response with streaming
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
-        
-        try:
-            # Stream the agent's response
-            for event in agent.stream(
-                {"messages": [{"role": "user", "content": prompt}]},
-                stream_mode="values",
-            ):
-                last_message = event["messages"][-1]
-                
-                # Check if it's an AI message with content
-                if hasattr(last_message, 'content') and last_message.content:
-                    full_response = last_message.content
-                    message_placeholder.markdown(full_response + "▌")
-            
-            # Display final response
-            message_placeholder.markdown(full_response)
-            
-        except Exception as e:
-            error_message = f"Error: {str(e)}"
-            message_placeholder.error(error_message)
-            full_response = error_message
-        
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+    sources = sorted({doc.metadata.get("source", "unknown") for doc in context_docs})
+    if sources:
+        full_response += f"\n\n_Sources: {', '.join(sources)}_"
+        message_placeholder.markdown(full_response)
 
-# Sidebar with info and controls
-with st.sidebar:
-    st.header("About")
-    st.markdown("""
-    This is a RAG (Retrieval-Augmented Generation) agent that can answer questions 
-    about blog posts stored in a vector database.
-    
-    **Features:**
-    - 🔍 Semantic search through blog content
-    - 🤖 AI-powered responses using Google Gemini
-    - 💬 Interactive chat interface
-    """)
-    
-    st.divider()
-    
-    # Clear chat button
-    if st.button("Clear Chat History", type="secondary"):
-        st.session_state.messages = []
-        st.rerun()
-    
-    st.divider()
-    
-    st.caption("Powered by LangChain, Google Gemini & Supabase")
+    return full_response
+
+
+def init_state():
+    """Ensure session state keys exist."""
+    st.session_state.setdefault("messages", [])
+    st.session_state.setdefault("vector_store", None)
+    st.session_state.setdefault("kb_sources", [])
+
+
+def main():
+    init_state()
+    render_sidebar()
+
+    # Display chat history
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    prompt = st.chat_input("Ask anything about your uploaded content...")
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Retrieve and answer
+        with st.chat_message("assistant"):
+            context_docs = retrieve_context(prompt)
+            answer = stream_answer(prompt, context_docs)
+
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+
+    # Footer
+    st.sidebar.divider()
+    st.sidebar.caption(
+        "In-memory RAG chatbot. Nothing is persisted; reload the vector store each run."
+    )
+
+
+if __name__ == "__main__":
+    main()

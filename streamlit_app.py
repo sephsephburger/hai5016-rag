@@ -24,6 +24,16 @@ def _normalize_content(content):
         return "\n".join(parts)
     return str(content)
 
+
+def _render_thinking_log(log):
+    """Render a readable chain-of-thought style trace."""
+    if not log:
+        return "Waiting for reasoning steps..."
+    lines = []
+    for idx, entry in enumerate(log, start=1):
+        lines.append(f"**Step {idx}:** {entry}")
+    return "\n\n".join(lines)
+
 # Load environment variables
 load_dotenv()
 
@@ -91,11 +101,11 @@ def initialize_agent():
     )
     agent = create_agent(model, tools, system_prompt=prompt)
     
-    return agent
+    return agent, vector_store
 
 # Initialize the agent
 try:
-    agent = initialize_agent()
+    agent, vector_store = initialize_agent()
 except Exception as e:
     st.error(f"Error initializing agent: {str(e)}")
     st.stop()
@@ -121,10 +131,18 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
         message_placeholder.markdown("Thinking...")
         with st.expander("See Thinking Process", expanded=False):
             thinking_placeholder = st.empty()
+            thinking_placeholder.markdown("Waiting for reasoning steps...")
         full_response = ""
         thinking_log = []
+        sources = []
         
         try:
+            # Pre-fetch citations to render numbered pills
+            try:
+                sources = vector_store.similarity_search(prompt, k=3)
+            except Exception:
+                sources = []
+            
             # Stream the agent's response
             for event in agent.stream(
                 {"messages": [{"role": "user", "content": prompt}]},
@@ -144,13 +162,28 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
                         role = getattr(msg, "role", "unknown")
                         text = _normalize_content(getattr(msg, "content", ""))
                         if text:
-                            text = text[:800]
+                            text = text[:300]
                         entries.append(f"{role}: {text}")
-                    thinking_log.append(" | ".join(entries))
-                    thinking_placeholder.markdown("\n\n".join(thinking_log))
+                    thinking_log.append(" · ".join(entries))
+                    thinking_placeholder.markdown(_render_thinking_log(thinking_log))
             
             # Display final response
-            message_placeholder.markdown(full_response)
+            citation_markup = ""
+            if sources:
+                pills = []
+                for idx, doc in enumerate(sources, start=1):
+                    label = (
+                        "<span style='display:inline-block;padding:2px 8px;"
+                        "border-radius:999px;border:1px solid #ccc;font-size:0.75rem;"
+                        "margin-right:6px;background-color:#f5f5f5;'>"
+                        f"{idx}</span>"
+                    )
+                    meta = doc.metadata if doc.metadata else {}
+                    source_text = meta if isinstance(meta, str) else meta.get("source", meta)
+                    pills.append(f"{label}<span style='font-size:0.85rem;'>{source_text}</span>")
+                citation_markup = "<br/><br/><div><strong>Sources</strong>: " + " ".join(pills) + "</div>"
+
+            message_placeholder.markdown(full_response + citation_markup, unsafe_allow_html=True)
             status_placeholder.success("Status: Done")
             
         except Exception as e:

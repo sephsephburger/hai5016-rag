@@ -9,17 +9,8 @@ from langchain.chat_models import init_chat_model
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
-# Prefer community loaders; fall back to legacy if needed.
-try:
-    from langchain_community.document_loaders import PyPDFLoader
-except ImportError:  # pragma: no cover
-    try:
-        from langchain.document_loaders import PyPDFLoader  # type: ignore
-    except ImportError as exc:
-        raise ImportError("PyPDFLoader not available. Ensure langchain-community is installed.") from exc
-
 from langchain_community.vectorstores import FAISS
+from pypdf import PdfReader
 
 # Support both the standalone splitter package and older langchain splitters.
 try:
@@ -77,15 +68,19 @@ def build_documents(files: List, pasted_text: str) -> List[Document]:
             docs.append(Document(page_content=content, metadata={"source": file.name}))
 
         elif suffix == ".pdf":
-            # Persist to a temp file because PyPDFLoader works with paths
+            # Persist to a temp file for pypdf
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(file.getbuffer())
                 temp_path = tmp.name
-            loader = PyPDFLoader(temp_path)
-            docs.extend(
-                Document(page_content=page.page_content, metadata={"source": file.name, **page.metadata})
-                for page in loader.load()
-            )
+            reader = PdfReader(temp_path)
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text() or ""
+                docs.append(
+                    Document(
+                        page_content=text,
+                        metadata={"source": file.name, "page": i + 1},
+                    )
+                )
             os.unlink(temp_path)
 
         else:

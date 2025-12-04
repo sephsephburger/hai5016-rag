@@ -6,12 +6,22 @@ from typing import List, Tuple
 import streamlit as st
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
+
+# Support both the standalone splitter package and older langchain splitters.
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:  # pragma: no cover - Streamlit Cloud may miss the extra package
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "RecursiveCharacterTextSplitter not found. Install langchain-text-splitters>=0.3.0."
+        ) from exc
 
 
 # Load environment variables early so Streamlit picks them up

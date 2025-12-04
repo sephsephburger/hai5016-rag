@@ -37,6 +37,10 @@ st.set_page_config(
 st.title("🤖 RAG Agent Chat")
 st.markdown("Ask questions about the blog posts and get AI-powered answers!")
 
+# Sidebar status placeholder
+status_placeholder = st.sidebar.empty()
+status_placeholder.info("Status: Idle")
+
 # Initialize session state for chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -105,6 +109,7 @@ for message in st.session_state.messages:
 if prompt := st.chat_input("Ask a question about the blog posts..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
+    status_placeholder.warning("Status: Thinking...")
     
     # Display user message
     with st.chat_message("user"):
@@ -113,6 +118,9 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
     # Display assistant response with streaming
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
+        message_placeholder.markdown("Thinking...")
+        with st.expander("See Thinking Process", expanded=False):
+            thinking_placeholder = st.empty()
         full_response = ""
         
         try:
@@ -127,15 +135,17 @@ if prompt := st.chat_input("Ask a question about the blog posts..."):
                 content = _normalize_content(getattr(last_message, "content", ""))
                 if content:
                     full_response = content
-                    message_placeholder.markdown(full_response)
+                    thinking_placeholder.markdown(full_response)
             
             # Display final response
             message_placeholder.markdown(full_response)
+            status_placeholder.success("Status: Done")
             
         except Exception as e:
             error_message = f"Error: {str(e)}"
             message_placeholder.error(error_message)
             full_response = error_message
+            status_placeholder.error("Status: Error")
         
         # Add assistant response to chat history
         st.session_state.messages.append({"role": "assistant", "content": full_response})

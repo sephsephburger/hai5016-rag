@@ -9,7 +9,6 @@ from langchain.chat_models import init_chat_model
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from pypdf import PdfReader
 
 # Prefer community FAISS; fall back to legacy import
 try:
@@ -80,6 +79,12 @@ def build_documents(files: List, pasted_text: str) -> List[Document]:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(file.getbuffer())
                 temp_path = tmp.name
+            try:
+                from pypdf import PdfReader  # lazy import to avoid hard dependency at app start
+            except ImportError:
+                st.error("PDF support needs the 'pypdf' package. Add it to requirements and redeploy.")
+                os.unlink(temp_path)
+                continue
             reader = PdfReader(temp_path)
             for i, page in enumerate(reader.pages):
                 text = page.extract_text() or ""
